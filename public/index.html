@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Custom Checkout</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; text-align: center; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .container { max-width: 450px; margin: auto; }
+        #loading-message { padding: 40px; }
+
+        /* Custom UI */
+        #custom-checkout { display: none; margin-top: 20px; background-color: white; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); overflow: hidden; }
+        
+        /* Payment option styles */
+        .payment-option { padding: 20px; }
+        #onchain-option { display: none; } /* On-chain is hidden by default */
+        canvas { max-width: 100%; height: auto; }
+        .address-box { word-wrap: break-word; font-family: monospace; background: #f4f4f4; padding: 10px; border-radius: 4px; margin-top: 10px; }
+
+        /* --- ★★★ 1. Switch Button Style ★★★ --- */
+        #switch-button-container {
+            padding: 0 20px 20px 20px;
+            border-top: 1px solid #eee;
+            margin-top: 10px;
+        }
+        #switch-btn {
+            font-size: 1em;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: 1px solid #007bff;
+            background-color: #0a0a0a;
+            color: #007bff;
+            width: 100%;
+        }
+        #switch-btn:hover { background-color: #f8f9fa; }
+
+        /* Success Popup (unchanged) */
+        #success-popup { display: none; position: fixed; ... }
+        .popup-content { background-color: #fff; ... }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>My Custom Checkout</h1>
+        <p>Product: Awesome Gadget</p>
+        <p>Price: $10.00 USD</p>
+        <div id="loading-message"><p>Generating your invoice, please wait...</p></div>
+
+        <div id="custom-checkout">
+              <div id="onchain-option" class="payment-option">
+                <h3>Pay with Bitcoin (On-Chain)</h3>
+                <canvas id="onchain-qr"></canvas>
+                <p><strong>Address:</strong></p>
+                <div id="onchain-address" class="address-box"></div>
+            </div>
+            <div id="lightning-option" class="payment-option">
+                <h3>Scan with a Lightning Wallet</h3>
+                <canvas id="lightning-qr"></canvas>
+            </div>
+            
+          
+
+            <div id="switch-button-container">
+                <button id="switch-btn">Pay with Bitcoin (On-Chain)</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="success-popup" style="display: none;">
+        </div>
+
+    <script>
+        // Polling function (unchanged)
+        function startPolling(orderId) {
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/check-status/${orderId}`);
+                    const data = await res.json();
+                    if (data.status === 'Paid') {
+                        clearInterval(interval);
+                        document.getElementById('custom-checkout').style.display = 'none';
+                        document.getElementById('success-popup').style.display = 'flex';
+                    }
+                } catch (e) { clearInterval(interval); }
+            }, 3000);
+        }
+
+        // Page load logic (updated)
+        document.addEventListener('DOMContentLoaded', async () => {
+            const loadingMessage = document.getElementById('loading-message');
+            const lightningOption = document.getElementById('lightning-option');
+            const onchainOption = document.getElementById('onchain-option');
+            const switchBtn = document.getElementById('switch-btn');
+            const switchBtnContainer = document.getElementById('switch-button-container');
+
+            try {
+                const response = await fetch('/create-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: 10.00, currency: 'USD' })
+                });
+                if (!response.ok) throw new Error('Failed to create invoice.');
+
+                const invoice = await response.json();
+                const { orderId, lightningInvoice, onchainAddress } = invoice;
+
+                let hasLightning = false;
+                let hasOnchain = false;
+
+                if (lightningInvoice) {
+                    new QRious({ element: document.getElementById('lightning-qr'), value: lightningInvoice.toUpperCase(), size: 300 });
+                    hasLightning = true;
+                } else {
+                    lightningOption.style.display = 'none';
+                }
+                
+                if (onchainAddress) {
+                    new QRious({ element: document.getElementById('onchain-qr'), value: `bitcoin:${onchainAddress}`, size: 300 });
+                    document.getElementById('onchain-address').textContent = onchainAddress;
+                    hasOnchain = true;
+                } else {
+                    onchainOption.style.display = 'none';
+                }
+
+                // --- ★★★ 3. Button Logic ★★★ ---
+                if (hasLightning && hasOnchain) {
+                    // Both exist, so the button should work
+                    switchBtnContainer.style.display = 'block';
+                    lightningOption.style.display = 'block'; // Show lightning by default
+                    onchainOption.style.display = 'none';
+                } else if (hasLightning) {
+                    // Only lightning
+                    switchBtnContainer.style.display = 'none';
+                    lightningOption.style.display = 'block';
+                } else if (hasOnchain) {
+                    // Only on-chain
+                    switchBtnContainer.style.display = 'none';
+                    onchainOption.style.display = 'block';
+                }
+
+                loadingMessage.style.display = 'none';
+                document.getElementById('custom-checkout').style.display = 'block';
+                startPolling(orderId);
+
+            } catch (error) {
+                loadingMessage.innerHTML = '<p style="color: red;">Could not load invoice. Please refresh the page to try again.</p>';
+            }
+        });
+
+        // --- ★★★ 4. Click Handler for the Switch Button ★★★ ---
+        document.getElementById('switch-btn').addEventListener('click', () => {
+            const lightningOption = document.getElementById('lightning-option');
+            const onchainOption = document.getElementById('onchain-option');
+            const switchBtn = document.getElementById('switch-btn');
+
+            // Check which one is currently visible
+            if (lightningOption.style.display === 'block') {
+                // Switch to on-chain
+                lightningOption.style.display = 'none';
+                onchainOption.style.display = 'block';
+                switchBtn.textContent = 'Pay with Lightning';
+            } else {
+                // Switch to lightning
+                lightningOption.style.display = 'block';
+                onchainOption.style.display = 'none';
+                switchBtn.textContent = 'Pay with Bitcoin (On-Chain)';
+            }
+        });
+    </script>
+</body>
+</html>

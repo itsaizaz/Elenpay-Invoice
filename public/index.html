@@ -104,7 +104,9 @@
                 if (!response.ok) throw new Error('Failed to create invoice.');
 
                 const invoice = await response.json();
-                const { orderId, lightningInvoice, onchainAddress } = invoice;
+                // const { orderId, lightningInvoice, onchainAddress } = invoice;
+                // We now get 'invoiceId' from the server response
+                const { invoiceId, lightningInvoice, onchainAddress } = invoice; 
 
                 let hasLightning = false;
                 let hasOnchain = false;
@@ -142,7 +144,8 @@
 
                 loadingMessage.style.display = 'none';
                 document.getElementById('custom-checkout').style.display = 'block';
-                startPolling(orderId);
+                // startPolling(orderId);
+                startPolling(invoiceId); 
 
             } catch (error) {
                 loadingMessage.innerHTML = '<p style="color: red;">Could not load invoice. Please refresh the page to try again.</p>';

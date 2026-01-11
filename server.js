@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Elenpay API Configuration
-const ELENPAY_API_URL = process.env.ELENPAY_API_URL || 'https://api.staging.elenpay.tech';
+const ELENPAY_API_URL = process.env.ELENPAY_API_URL || 'https://api-staging.paidlyinteractive.com';
 const ELENPAY_API_TOKEN = process.env.ELENPAY_API_TOKEN;
 const ELENPAY_STORE_ID = process.env.ELENPAY_STORE_ID;
 
@@ -23,6 +23,13 @@ if (!ELENPAY_API_TOKEN || !ELENPAY_STORE_ID) {
     console.error('Please set ELENPAY_API_TOKEN and ELENPAY_STORE_ID in your .env file');
 }
 
+// Helper function to sanitize metadata values
+function sanitizeMetadata(value) {
+    return value
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
 // Helper function to make Elenpay API requests
 async function elenpayRequest(endpoint, method = 'GET', data = null) {
     try {
@@ -30,7 +37,7 @@ async function elenpayRequest(endpoint, method = 'GET', data = null) {
             method,
             url: `${ELENPAY_API_URL}${endpoint}`,
             headers: {
-                'Authorization': `Token ${ELENPAY_API_TOKEN}`,
+                'Authorization': `Bearer ${ELENPAY_API_TOKEN}`,
                 'Content-Type': 'application/json',
                 'accept': 'application/json'
             }
@@ -56,30 +63,35 @@ app.post('/api/create-invoice', async (req, res) => {
         console.log(`Creating ${paymentMethod} invoice for ${amount} ${currency}`);
 
         // Prepare payment methods array
-        const paymentMethods = [];
+        // NOTE: Testing different variations to find correct on-chain naming
+        const paymentMethodsArray = [];
         
         if (paymentMethod === 'lightning') {
-            paymentMethods.push('BTC-LightningNetwork');
+            paymentMethodsArray.push('BTC-LightningNetwork');
         } else if (paymentMethod === 'onchain') {
-            paymentMethods.push('BTC-Onchain');
+            // Try different variations - one of these should work
+            // Based on your previous success, the correct format exists
+            paymentMethodsArray.push('BTC-Onchain');  // Try this first
+            // Other possible formats if first doesn't work:
+            // 'BTCOnchain', 'BTC-OnChain', 'BTC_Onchain', 'Onchain'
         } else {
             // If not specified, include both
-            paymentMethods.push('BTC-LightningNetwork', 'BTC-Onchain');
+            paymentMethodsArray.push('BTC-LightningNetwork', 'BTC-Onchain');
         }
 
-        // Create invoice via Elenpay API - Note the correct URL format
+        console.log('Requesting payment methods:', paymentMethodsArray);
+
+        // Create invoice via Elenpay API
         const invoiceData = {
             amount: amount.toString(),
             currency: currency,
-            description: description || 'Payment',
             checkout: {
-                paymentMethods: paymentMethods,
-                redirectURL: `${req.protocol}://${req.get('host')}/success`,
+                paymentMethods: paymentMethodsArray,
                 expirationMinutes: 15
             },
             metadata: {
-                orderId: `order_${Date.now()}`,
-                customer: 'web_customer'
+                order_id: `order_${Date.now()}`,
+                description: sanitizeMetadata(description || 'Payment')
             }
         };
 
@@ -91,39 +103,118 @@ app.post('/api/create-invoice', async (req, res) => {
         );
 
         console.log('Invoice created:', invoice.id);
+        console.log('Full invoice response:', JSON.stringify(invoice, null, 2));
+
+        // NOW FETCH THE ACTUAL PAYMENT METHODS
+        // Elenpay doesn't return Lightning invoice/address in create response
+        // We need to fetch payment methods separately
+        console.log(`Fetching payment methods for invoice: ${invoice.id}`);
+        
+        let paymentMethods = null;
+        let retries = 0;
+        const maxRetries = paymentMethod === 'onchain' ? 5 : 1; // Retry more for on-chain
+        
+        // For on-chain, the address might take time to generate, so we'll poll
+        while (retries < maxRetries) {
+            if (retries > 0) {
+                console.log(`Retry ${retries}/${maxRetries} - Waiting 2 seconds before next attempt...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            
+            try {
+                paymentMethods = await elenpayRequest(
+                    `/api/v1/stores/${ELENPAY_STORE_ID}/invoices/${invoice.id}/payment-methods`
+                );
+                
+                console.log(`Attempt ${retries + 1} - Payment methods response:`, JSON.stringify(paymentMethods, null, 2));
+                
+                // Check if we got the payment method we need
+                if (paymentMethods && paymentMethods.length > 0) {
+                    const hasLightning = paymentMethods.some(m => m.paymentMethod === 'BTC-LightningNetwork' && m.destination);
+                    const hasOnchain = paymentMethods.some(m => m.paymentMethod === 'BTC-Onchain' && m.destination);
+                    
+                    if (paymentMethod === 'lightning' && hasLightning) {
+                        console.log('✅ Lightning invoice found, stopping retries');
+                        break;
+                    } else if (paymentMethod === 'onchain' && hasOnchain) {
+                        console.log('✅ On-chain address found, stopping retries');
+                        break;
+                    }
+                }
+                
+                retries++;
+            } catch (error) {
+                console.error(`Error fetching payment methods (attempt ${retries + 1}):`, error);
+                retries++;
+            }
+        }
+
+        console.log('Number of payment methods:', paymentMethods?.length || 0);
 
         // Extract payment details based on method
         let responseData = {
             invoiceId: invoice.id,
-            checkoutURL: invoice.checkoutURL,
-            expiresAt: invoice.expiresAt,
+            checkoutURL: invoice.checkoutLink,
+            expiresAt: invoice.expirationTime,
             status: invoice.status
         };
 
-        // Add method-specific data
-        if (paymentMethod === 'lightning' && invoice.lightningInvoice) {
-            responseData.lightningInvoice = invoice.lightningInvoice;
-        } else if (paymentMethod === 'onchain' && invoice.address) {
-            responseData.address = invoice.address;
-            responseData.btcAmount = invoice.btcAmount;
+        // Find the requested payment method
+        let onchainNotAvailable = false;
+        
+        if (paymentMethods && paymentMethods.length > 0) {
+            console.log('Processing payment methods...');
+            
+            // Check if we requested on-chain but only got Lightning
+            const hasOnlyLightning = paymentMethods.every(m => m.paymentMethod === 'BTC-LightningNetwork');
+            const hasOnchain = paymentMethods.some(m => m.paymentMethod === 'BTC-Onchain');
+            
+            if (paymentMethod === 'onchain' && hasOnlyLightning && !hasOnchain) {
+                console.log('⚠️ On-chain requested but only Lightning available (RegTest/Staging limitation)');
+                onchainNotAvailable = true;
+            }
+            
+            for (const method of paymentMethods) {
+                console.log(`Method: ${method.paymentMethod}, Destination: ${method.destination || 'NOT SET'}`);
+                
+                if (paymentMethod === 'lightning' && method.paymentMethod === 'BTC-LightningNetwork' && method.destination) {
+                    console.log('✅ Found Lightning method');
+                    responseData.lightningInvoice = method.destination;
+                } else if (paymentMethod === 'onchain' && method.paymentMethod === 'BTC-Onchain' && method.destination) {
+                    console.log('✅ Found On-chain method');
+                    responseData.address = method.destination;
+                    responseData.btcAmount = method.amount || method.cryptoAmount || '0.00000000';
+                    console.log(`Address: ${responseData.address}, Amount: ${responseData.btcAmount}`);
+                }
+            }
         } else {
-            // Return both if available
-            if (invoice.lightningInvoice) {
-                responseData.lightningInvoice = invoice.lightningInvoice;
-            }
-            if (invoice.address) {
-                responseData.address = invoice.address;
-                responseData.btcAmount = invoice.btcAmount;
-            }
+            console.log('⚠️ No payment methods returned from API');
         }
 
+        // Handle the case where on-chain was requested but isn't available
+        if (onchainNotAvailable) {
+            responseData.useCheckoutLink = true;
+            responseData.onchainNotAvailable = true;
+            responseData.message = '⚠️ On-Chain Payments Not Available in Staging\n\nElenpay\'s RegTest/Staging environment only supports Lightning Network payments. For real Bitcoin on-chain transactions, please use the production environment.\n\nThe checkout page will show Lightning Network payment as an alternative.';
+        } else if (!responseData.lightningInvoice && !responseData.address) {
+            // If still no address/invoice found after retries, provide checkout link
+            console.log('⚠️ No payment details found after retries. Providing checkout link');
+            console.log('Checkout link:', responseData.checkoutURL);
+            
+            responseData.useCheckoutLink = true;
+            responseData.message = paymentMethod === 'onchain' 
+                ? 'On-chain address generation is taking longer than expected. Please use the checkout page.'
+                : 'Payment details not available. Please use the checkout page.';
+        }
+
+        console.log('Final response data:', JSON.stringify(responseData, null, 2));
         res.json(responseData);
 
     } catch (error) {
         console.error('Error creating invoice:', error.response?.data || error.message);
         res.status(500).json({ 
             error: 'Failed to create invoice',
-            details: error.response?.data?.message || error.message
+            details: error.response?.data || error.message
         });
     }
 });
@@ -164,12 +255,6 @@ app.post('/api/webhook', async (req, res) => {
             invoiceId: event.invoiceId,
             status: event.status
         });
-
-        // Verify webhook signature (if Elenpay provides one)
-        // const signature = req.headers['x-elenpay-signature'];
-        // if (!verifySignature(signature, req.body)) {
-        //     return res.status(401).json({ error: 'Invalid signature' });
-        // }
 
         // Handle different event types
         switch (event.type) {
@@ -312,8 +397,44 @@ app.get('/success', (req, res) => {
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'ok', 
-        elenpayConfigured: !!(ELENPAY_API_TOKEN && ELENPAY_STORE_ID)
+        elenpayConfigured: !!(ELENPAY_API_TOKEN && ELENPAY_STORE_ID),
+        apiUrl: ELENPAY_API_URL
     });
+});
+
+// Debug endpoint to test payment methods retrieval
+app.get('/api/debug/invoice/:invoiceId', async (req, res) => {
+    try {
+        const { invoiceId } = req.params;
+        
+        console.log(`\n=== DEBUG: Fetching invoice ${invoiceId} ===`);
+        
+        // Get invoice details
+        const invoice = await elenpayRequest(
+            `/api/v1/stores/${ELENPAY_STORE_ID}/invoices/${invoiceId}`
+        );
+        
+        console.log('Invoice details:', JSON.stringify(invoice, null, 2));
+        
+        // Get payment methods
+        const paymentMethods = await elenpayRequest(
+            `/api/v1/stores/${ELENPAY_STORE_ID}/invoices/${invoiceId}/payment-methods`
+        );
+        
+        console.log('Payment methods:', JSON.stringify(paymentMethods, null, 2));
+        
+        res.json({
+            invoice,
+            paymentMethods
+        });
+        
+    } catch (error) {
+        console.error('Debug endpoint error:', error);
+        res.status(500).json({ 
+            error: error.message,
+            details: error.response?.data
+        });
+    }
 });
 
 // Serve the main page

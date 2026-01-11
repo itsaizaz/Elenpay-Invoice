@@ -20,6 +20,7 @@
             --success-green: #10b981;
             --glow-orange: rgba(247, 147, 26, 0.3);
             --glow-purple: rgba(145, 70, 255, 0.3);
+            --error-red: #ef4444;
         }
 
         * {
@@ -222,12 +223,15 @@
             border-radius: 16px;
             display: inline-block;
             margin: 20px 0;
+            min-height: 290px;
+            min-width: 290px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .qr-code {
-            width: 250px;
-            height: 250px;
-            display: block;
+            /* QR code will be inserted here */
         }
 
         .address-container {
@@ -301,6 +305,12 @@
             border: 1px solid rgba(16, 185, 129, 0.3);
         }
 
+        .status-error {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--error-red);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
         .spinner {
             width: 20px;
             height: 20px;
@@ -348,6 +358,28 @@
             margin: 0 auto 20px;
         }
 
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error-red);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            color: var(--error-red);
+        }
+
+        .debug-info {
+            background: var(--card-hover);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 2rem;
@@ -361,9 +393,9 @@
                 grid-template-columns: 1fr;
             }
 
-            .qr-code {
-                width: 200px;
-                height: 200px;
+            .qr-container {
+                min-height: 250px;
+                min-width: 250px;
             }
         }
 
@@ -422,7 +454,7 @@
             <div id="lightningContent" style="display: none;">
                 <div style="text-align: center;">
                     <div class="qr-container">
-                        <canvas id="lightningQR" class="qr-code"></canvas>
+                        <div id="lightningQR" class="qr-code"></div>
                     </div>
                 </div>
 
@@ -437,6 +469,15 @@
                 <div class="status-badge status-pending" id="lightningStatus">
                     <span class="spinner"></span>
                     Awaiting payment...
+                </div>
+
+                <!-- Debug info -->
+                <div class="debug-info" id="lightningDebug" style="display: none;"></div>
+            </div>
+
+            <div id="lightningError" style="display: none;">
+                <div class="error-message">
+                    <strong>Error:</strong> <span id="lightningErrorText"></span>
                 </div>
             </div>
         </div>
@@ -453,7 +494,7 @@
             <div id="onchainContent" style="display: none;">
                 <div style="text-align: center;">
                     <div class="qr-container">
-                        <canvas id="onchainQR" class="qr-code"></canvas>
+                        <div id="onchainQR" class="qr-code"></div>
                     </div>
                 </div>
 
@@ -474,16 +515,25 @@
                     <span class="spinner"></span>
                     Awaiting payment...
                 </div>
+
+                <!-- Debug info -->
+                <div class="debug-info" id="onchainDebug" style="display: none;"></div>
+            </div>
+
+            <div id="onchainError" style="display: none;">
+                <div class="error-message">
+                    <strong>Error:</strong> <span id="onchainErrorText"></span>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- QR Code Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 
     <script>
         // Configuration
-        const ELENPAY_API_URL = '/api/create-invoice'; // Your backend endpoint
+        const ELENPAY_API_URL = '/api/create-invoice';
         let currentInvoiceId = null;
         let statusCheckInterval = null;
 
@@ -515,6 +565,8 @@
         // Generate Lightning invoice
         async function generateLightningInvoice() {
             try {
+                console.log('Requesting Lightning invoice...');
+                
                 const response = await fetch(ELENPAY_API_URL, {
                     method: 'POST',
                     headers: {
@@ -523,13 +575,24 @@
                     body: JSON.stringify({
                         amount: 10,
                         currency: 'USD',
-                        description: 'Awesome Gadget',
+                        description: 'Awesome_Gadget',
                         paymentMethod: 'lightning'
                     })
                 });
 
                 const data = await response.json();
+                console.log('Server response:', data);
+
+                if (!response.ok || !data.invoiceId) {
+                    throw new Error(data.error || data.details || 'Invoice creation failed');
+                }
+
                 currentInvoiceId = data.invoiceId;
+
+                // Check if we have the Lightning invoice
+                if (!data.lightningInvoice) {
+                    throw new Error('No Lightning invoice returned from server. Check server logs.');
+                }
 
                 // Hide loading, show content
                 document.getElementById('lightningLoading').style.display = 'none';
@@ -537,6 +600,13 @@
 
                 // Display invoice
                 document.getElementById('lightningInvoice').textContent = data.lightningInvoice;
+
+                // Show debug info (optional - remove in production)
+                const debugEl = document.getElementById('lightningDebug');
+                debugEl.textContent = JSON.stringify(data, null, 2);
+                debugEl.style.display = 'block';
+
+                console.log('Generating QR code for:', data.lightningInvoice);
 
                 // Generate QR code
                 generateQRCode('lightningQR', data.lightningInvoice);
@@ -546,14 +616,18 @@
 
             } catch (error) {
                 console.error('Error generating Lightning invoice:', error);
-                alert('Failed to generate Lightning invoice. Please try again.');
-                showPaymentSelection();
+                
+                document.getElementById('lightningLoading').style.display = 'none';
+                document.getElementById('lightningError').style.display = 'block';
+                document.getElementById('lightningErrorText').textContent = error.message;
             }
         }
 
         // Generate On-chain invoice
         async function generateOnchainInvoice() {
             try {
+                console.log('Requesting on-chain address...');
+                
                 const response = await fetch(ELENPAY_API_URL, {
                     method: 'POST',
                     headers: {
@@ -562,24 +636,120 @@
                     body: JSON.stringify({
                         amount: 10,
                         currency: 'USD',
-                        description: 'Awesome Gadget',
+                        description: 'Awesome_Gadget',
                         paymentMethod: 'onchain'
                     })
                 });
 
                 const data = await response.json();
+                console.log('Server response:', data);
+
+                if (!response.ok || !data.invoiceId) {
+                    throw new Error(data.error || data.details || 'Invoice creation failed');
+                }
+
                 currentInvoiceId = data.invoiceId;
 
-                // Hide loading, show content
+                // Check if on-chain is not available (staging/RegTest limitation)
+                if (data.onchainNotAvailable) {
+                    document.getElementById('onchainLoading').style.display = 'none';
+                    document.getElementById('onchainContent').innerHTML = `
+                        <div style="padding: 30px; text-align: center;">
+                            <div style="background: rgba(239, 147, 26, 0.1); border: 2px solid var(--btc-orange); border-radius: 16px; padding: 30px; margin-bottom: 30px;">
+                                <div style="font-size: 3rem; margin-bottom: 20px;">⚠️</div>
+                                <h3 style="color: var(--text-primary); margin-bottom: 15px; font-size: 1.4rem;">
+                                    On-Chain Payments Not Available
+                                </h3>
+                                <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px;">
+                                    Elenpay's staging environment (RegTest) only supports <strong>Lightning Network</strong> payments.
+                                </p>
+                                <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 25px;">
+                                    For real Bitcoin on-chain transactions with QR codes, please use the <strong>production environment</strong> with mainnet Bitcoin.
+                                </p>
+                                <div style="background: var(--card-hover); border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+                                    <p style="color: var(--lightning-purple); font-weight: 600; margin-bottom: 10px;">
+                                        ⚡ Alternative: Lightning Network
+                                    </p>
+                                    <p style="color: var(--text-secondary); font-size: 0.95rem;">
+                                        The checkout page will show Lightning payment as an alternative, which is instant and has near-zero fees.
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                                <button onclick="showPaymentSelection()" class="copy-button" style="background: var(--text-secondary);">
+                                    ← Try Lightning Instead
+                                </button>
+                                <a href="${data.checkoutURL}" target="_blank" class="copy-button" style="display: inline-block; text-decoration: none;">
+                                    🔗 View Checkout Page
+                                </a>
+                            </div>
+                            
+                            <div style="margin-top: 30px; padding: 20px; background: var(--card-hover); border-radius: 12px; text-align: left;">
+                                <strong style="color: var(--btc-orange);">💡 For Production:</strong>
+                                <ul style="color: var(--text-secondary); margin-top: 10px; padding-left: 20px; line-height: 1.8;">
+                                    <li>Switch to production API endpoint</li>
+                                    <li>Use mainnet Bitcoin</li>
+                                    <li>On-chain addresses will generate automatically</li>
+                                    <li>QR codes will display instantly</li>
+                                </ul>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('onchainContent').style.display = 'block';
+                    return;
+                }
+
+                // Check if we should embed the checkout page for other reasons
+                if (data.useCheckoutLink || !data.address) {
+                    document.getElementById('onchainLoading').style.display = 'none';
+                    document.getElementById('onchainContent').innerHTML = `
+                        <div style="padding: 20px;">
+                            <div style="background: rgba(239, 147, 26, 0.1); border: 1px solid var(--btc-orange); border-radius: 12px; padding: 20px; margin-bottom: 20px; text-align: center;">
+                                <p style="color: var(--text-secondary); margin: 0;">
+                                    ⏳ On-chain address is being generated. Complete payment using the checkout page below.
+                                </p>
+                            </div>
+                            
+                            <div style="position: relative; width: 100%; padding-top: 75%; border-radius: 16px; overflow: hidden; border: 2px solid var(--border-color);">
+                                <iframe 
+                                    src="${data.checkoutURL}" 
+                                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;"
+                                    title="Elenpay Checkout"
+                                ></iframe>
+                            </div>
+                            
+                            <div style="text-align: center; margin-top: 20px;">
+                                <a href="${data.checkoutURL}" target="_blank" class="copy-button" style="display: inline-block; text-decoration: none; background: var(--text-secondary);">
+                                    🔗 Open in New Tab
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('onchainContent').style.display = 'block';
+                    
+                    // Still check payment status
+                    checkPaymentStatus('onchain');
+                    return;
+                }
+
+                // Hide loading, show content with QR code
                 document.getElementById('onchainLoading').style.display = 'none';
                 document.getElementById('onchainContent').style.display = 'block';
 
                 // Display address and amount
                 document.getElementById('onchainAddress').textContent = data.address;
-                document.getElementById('btcAmount').textContent = `${data.btcAmount} BTC`;
+                document.getElementById('btcAmount').textContent = `${data.btcAmount || '0.00000000'} BTC`;
+
+                // Show debug info (optional - remove in production)
+                const debugEl = document.getElementById('onchainDebug');
+                debugEl.textContent = JSON.stringify(data, null, 2);
+                debugEl.style.display = 'block';
 
                 // Generate QR code with bitcoin URI
                 const bitcoinURI = `bitcoin:${data.address}?amount=${data.btcAmount}`;
+                console.log('Generating QR code for:', bitcoinURI);
+                
                 generateQRCode('onchainQR', bitcoinURI);
 
                 // Start checking payment status
@@ -587,22 +757,46 @@
 
             } catch (error) {
                 console.error('Error generating on-chain invoice:', error);
-                alert('Failed to generate Bitcoin address. Please try again.');
-                showPaymentSelection();
+                
+                document.getElementById('onchainLoading').style.display = 'none';
+                document.getElementById('onchainError').style.display = 'block';
+                document.getElementById('onchainErrorText').textContent = error.message;
             }
         }
 
         // Generate QR code
         function generateQRCode(elementId, data) {
-            const canvas = document.getElementById(elementId);
-            const qr = new QRCode(canvas, {
-                text: data,
-                width: 250,
-                height: 250,
-                colorDark: '#000000',
-                colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.H
-            });
+            try {
+                console.log(`Generating QR code in element: ${elementId}`);
+                console.log('QR data:', data);
+                
+                const container = document.getElementById(elementId);
+                
+                // Clear any existing QR code
+                container.innerHTML = '';
+                
+                // Check if QRCode library is loaded
+                if (typeof QRCode === 'undefined') {
+                    throw new Error('QRCode library not loaded');
+                }
+                
+                // Generate QR code
+                const qr = new QRCode(container, {
+                    text: data,
+                    width: 250,
+                    height: 250,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.H
+                });
+                
+                console.log('QR code generated successfully');
+                
+            } catch (error) {
+                console.error('Error generating QR code:', error);
+                document.getElementById(elementId).innerHTML = 
+                    `<div style="color: #ef4444; padding: 20px;">QR Code Error: ${error.message}</div>`;
+            }
         }
 
         // Copy to clipboard
@@ -613,20 +807,29 @@
                 const button = event.target;
                 const originalText = button.textContent;
                 button.textContent = '✓ Copied!';
+                button.style.background = 'var(--success-green)';
                 setTimeout(() => {
                     button.textContent = originalText;
+                    button.style.background = 'var(--btc-orange)';
                 }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
             });
         }
 
         // Check payment status
         function checkPaymentStatus(method) {
+            if (!currentInvoiceId) return;
+            
             statusCheckInterval = setInterval(async () => {
                 try {
                     const response = await fetch(`/api/check-status/${currentInvoiceId}`);
                     const data = await response.json();
 
-                    if (data.status === 'paid' || data.status === 'completed') {
+                    console.log('Payment status:', data.status);
+
+                    if (data.status === 'paid' || data.status === 'completed' || data.status === 'Settled') {
                         // Payment received!
                         clearInterval(statusCheckInterval);
                         
@@ -647,6 +850,16 @@
                 }
             }, 5000); // Check every 5 seconds
         }
+
+        // Check if QRCode library is loaded
+        window.addEventListener('load', () => {
+            if (typeof QRCode === 'undefined') {
+                console.error('QRCode library failed to load!');
+                alert('QR Code library failed to load. Please refresh the page.');
+            } else {
+                console.log('QRCode library loaded successfully');
+            }
+        });
     </script>
 </body>
 </html>

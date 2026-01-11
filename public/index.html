@@ -2,174 +2,651 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Custom Checkout</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Payment - Lightning & On-Chain</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; text-align: center; padding: 20px; background-color: #f8f9fa; color: #333; }
-        .container { max-width: 450px; margin: auto; }
-        #loading-message { padding: 40px; }
-
-        /* Custom UI */
-        #custom-checkout { display: none; margin-top: 20px; background-color: white; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); overflow: hidden; }
-        
-        /* Payment option styles */
-        .payment-option { padding: 20px; }
-        #onchain-option { display: none; } /* On-chain is hidden by default */
-        canvas { max-width: 100%; height: auto; }
-        .address-box { word-wrap: break-word; font-family: monospace; background: #f4f4f4; padding: 10px; border-radius: 4px; margin-top: 10px; }
-
-        /* --- ★★★ 1. Switch Button Style ★★★ --- */
-        #switch-button-container {
-            padding: 0 20px 20px 20px;
-            border-top: 1px solid #eee;
-            margin-top: 10px;
+        :root {
+            --btc-orange: #f7931a;
+            --lightning-purple: #9146ff;
+            --dark-bg: #0a0e1a;
+            --card-bg: #141829;
+            --card-hover: #1a1f3a;
+            --text-primary: #ffffff;
+            --text-secondary: #8b92b2;
+            --border-color: #2a2f4a;
+            --success-green: #10b981;
+            --glow-orange: rgba(247, 147, 26, 0.3);
+            --glow-purple: rgba(145, 70, 255, 0.3);
         }
-        #switch-btn {
-            font-size: 1em;
-            padding: 10px 15px;
-            cursor: pointer;
-            border-radius: 5px;
-            border: 1px solid #007bff;
-            background-color: #0a0a0a;
-            color: #007bff;
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--dark-bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated background gradient */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 30% 20%, rgba(247, 147, 26, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(145, 70, 255, 0.05) 0%, transparent 50%);
+            animation: gradientShift 20s ease infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(5%, 5%) rotate(10deg); }
+            66% { transform: translate(-5%, -5%) rotate(-10deg); }
+        }
+
+        .container {
+            max-width: 900px;
             width: 100%;
+            position: relative;
+            z-index: 1;
         }
-        #switch-btn:hover { background-color: #f8f9fa; }
 
-        /* Success Popup (unchanged) */
-        #success-popup { display: none; position: fixed; ... }
-        .popup-content { background-color: #fff; ... }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--btc-orange), var(--lightning-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .product-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 30px;
+            margin-bottom: 30px;
+            animation: fadeInUp 0.8s ease-out 0.2s both;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .product-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .product-name {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .product-price {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--btc-orange);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .payment-methods {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            animation: fadeInUp 0.8s ease-out 0.4s both;
+        }
+
+        .payment-method {
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 20px;
+            padding: 30px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .payment-method::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--glow-orange), var(--glow-purple));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        .payment-method:hover {
+            transform: translateY(-5px);
+            border-color: var(--btc-orange);
+            box-shadow: 0 10px 40px var(--glow-orange);
+        }
+
+        .payment-method:hover::before {
+            opacity: 0.1;
+        }
+
+        .payment-method.lightning:hover {
+            border-color: var(--lightning-purple);
+            box-shadow: 0 10px 40px var(--glow-purple);
+        }
+
+        .payment-method-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .payment-method h3 {
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+        }
+
+        .payment-method p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .payment-details {
+            display: none;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 40px;
+            margin-top: 30px;
+            animation: fadeInUp 0.5s ease-out;
+        }
+
+        .payment-details.active {
+            display: block;
+        }
+
+        .qr-container {
+            background: white;
+            padding: 20px;
+            border-radius: 16px;
+            display: inline-block;
+            margin: 20px 0;
+        }
+
+        .qr-code {
+            width: 250px;
+            height: 250px;
+            display: block;
+        }
+
+        .address-container {
+            background: var(--card-hover);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .address-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .address-text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem;
+            word-break: break-all;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .copy-button {
+            background: var(--btc-orange);
+            color: var(--dark-bg);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            margin-top: 15px;
+        }
+
+        .copy-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px var(--glow-orange);
+        }
+
+        .copy-button:active {
+            transform: scale(0.95);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+
+        .status-pending {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+            border: 1px solid rgba(234, 179, 8, 0.3);
+        }
+
+        .status-paid {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success-green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .back-button {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            margin-bottom: 20px;
+        }
+
+        .back-button:hover {
+            border-color: var(--text-primary);
+            color: var(--text-primary);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--btc-orange);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .product-price {
+                font-size: 1.5rem;
+            }
+
+            .payment-methods {
+                grid-template-columns: 1fr;
+            }
+
+            .qr-code {
+                width: 200px;
+                height: 200px;
+            }
+        }
+
+        /* Pulse animation for active status */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .status-pending .spinner {
+            animation: spin 1s linear infinite, pulse 2s ease-in-out infinite;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>My Custom Checkout</h1>
-        <p>Product: Awesome Gadget</p>
-        <p>Price: $10.00 USD</p>
-        <div id="loading-message"><p>Generating your invoice, please wait...</p></div>
+        <div class="header">
+            <h1>⚡ Bitcoin Payment</h1>
+            <p>Choose your preferred payment method</p>
+        </div>
 
-        <div id="custom-checkout">
-              <div id="onchain-option" class="payment-option">
-                <h3>Pay with Bitcoin (On-Chain)</h3>
-                <canvas id="onchain-qr"></canvas>
-                <p><strong>Address:</strong></p>
-                <div id="onchain-address" class="address-box"></div>
+        <div class="product-card">
+            <div class="product-info">
+                <div class="product-name">
+                    <strong>Product:</strong> <span id="productName">Awesome Gadget</span>
+                </div>
+                <div class="product-price" id="productPrice">$10.00</div>
             </div>
-            <div id="lightning-option" class="payment-option">
-                <h3>Scan with a Lightning Wallet</h3>
-                <canvas id="lightning-qr"></canvas>
+        </div>
+
+        <div id="paymentSelection">
+            <div class="payment-methods">
+                <div class="payment-method lightning" onclick="selectPaymentMethod('lightning')">
+                    <span class="payment-method-icon">⚡</span>
+                    <h3>Lightning Network</h3>
+                    <p>Instant payments with near-zero fees. Perfect for fast transactions.</p>
+                </div>
+
+                <div class="payment-method" onclick="selectPaymentMethod('onchain')">
+                    <span class="payment-method-icon">₿</span>
+                    <h3>Bitcoin On-Chain</h3>
+                    <p>Traditional blockchain transaction. More secure for larger amounts.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="lightningPayment" class="payment-details">
+            <button class="back-button" onclick="showPaymentSelection()">← Back to payment methods</button>
+            
+            <h2>⚡ Lightning Payment</h2>
+            <div class="loading" id="lightningLoading">
+                <div class="loading-spinner"></div>
+                <p>Generating Lightning invoice...</p>
             </div>
             
-          
+            <div id="lightningContent" style="display: none;">
+                <div style="text-align: center;">
+                    <div class="qr-container">
+                        <canvas id="lightningQR" class="qr-code"></canvas>
+                    </div>
+                </div>
 
-            <div id="switch-button-container">
-                <button id="switch-btn">Pay with Bitcoin (On-Chain)</button>
+                <div class="address-container">
+                    <div class="address-label">Lightning Invoice</div>
+                    <div class="address-text" id="lightningInvoice">Loading...</div>
+                    <button class="copy-button" onclick="copyToClipboard('lightningInvoice')">
+                        📋 Copy Invoice
+                    </button>
+                </div>
+
+                <div class="status-badge status-pending" id="lightningStatus">
+                    <span class="spinner"></span>
+                    Awaiting payment...
+                </div>
+            </div>
+        </div>
+
+        <div id="onchainPayment" class="payment-details">
+            <button class="back-button" onclick="showPaymentSelection()">← Back to payment methods</button>
+            
+            <h2>₿ On-Chain Payment</h2>
+            <div class="loading" id="onchainLoading">
+                <div class="loading-spinner"></div>
+                <p>Generating Bitcoin address...</p>
+            </div>
+            
+            <div id="onchainContent" style="display: none;">
+                <div style="text-align: center;">
+                    <div class="qr-container">
+                        <canvas id="onchainQR" class="qr-code"></canvas>
+                    </div>
+                </div>
+
+                <div class="address-container">
+                    <div class="address-label">Bitcoin Address</div>
+                    <div class="address-text" id="onchainAddress">Loading...</div>
+                    <button class="copy-button" onclick="copyToClipboard('onchainAddress')">
+                        📋 Copy Address
+                    </button>
+                </div>
+
+                <div class="address-container">
+                    <div class="address-label">Amount to Send</div>
+                    <div class="address-text" id="btcAmount">0.00000000 BTC</div>
+                </div>
+
+                <div class="status-badge status-pending" id="onchainStatus">
+                    <span class="spinner"></span>
+                    Awaiting payment...
+                </div>
             </div>
         </div>
     </div>
 
-    <div id="success-popup" style="display: none;">
-        </div>
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <script>
-        // Polling function (unchanged)
-        function startPolling(orderId) {
-            const interval = setInterval(async () => {
-                try {
-                    const res = await fetch(`/check-status/${orderId}`);
-                    const data = await res.json();
-                    if (data.status === 'Paid') {
-                        clearInterval(interval);
-                        document.getElementById('custom-checkout').style.display = 'none';
-                        document.getElementById('success-popup').style.display = 'flex';
-                    }
-                } catch (e) { clearInterval(interval); }
-            }, 3000);
+        // Configuration
+        const ELENPAY_API_URL = '/api/create-invoice'; // Your backend endpoint
+        let currentInvoiceId = null;
+        let statusCheckInterval = null;
+
+        // Payment method selection
+        function selectPaymentMethod(method) {
+            document.getElementById('paymentSelection').style.display = 'none';
+            
+            if (method === 'lightning') {
+                document.getElementById('lightningPayment').classList.add('active');
+                generateLightningInvoice();
+            } else {
+                document.getElementById('onchainPayment').classList.add('active');
+                generateOnchainInvoice();
+            }
         }
 
-        // Page load logic (updated)
-        document.addEventListener('DOMContentLoaded', async () => {
-            const loadingMessage = document.getElementById('loading-message');
-            const lightningOption = document.getElementById('lightning-option');
-            const onchainOption = document.getElementById('onchain-option');
-            const switchBtn = document.getElementById('switch-btn');
-            const switchBtnContainer = document.getElementById('switch-button-container');
+        function showPaymentSelection() {
+            document.getElementById('lightningPayment').classList.remove('active');
+            document.getElementById('onchainPayment').classList.remove('active');
+            document.getElementById('paymentSelection').style.display = 'block';
+            
+            // Clear interval if running
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+                statusCheckInterval = null;
+            }
+        }
 
+        // Generate Lightning invoice
+        async function generateLightningInvoice() {
             try {
-                const response = await fetch('/create-payment', {
+                const response = await fetch(ELENPAY_API_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: 10.00, currency: 'USD' })
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        amount: 10,
+                        currency: 'USD',
+                        description: 'Awesome Gadget',
+                        paymentMethod: 'lightning'
+                    })
                 });
-                if (!response.ok) throw new Error('Failed to create invoice.');
 
-                const invoice = await response.json();
-                // const { orderId, lightningInvoice, onchainAddress } = invoice;
-                // We now get 'invoiceId' from the server response
-                const { invoiceId, lightningInvoice, onchainAddress } = invoice; 
+                const data = await response.json();
+                currentInvoiceId = data.invoiceId;
 
-                let hasLightning = false;
-                let hasOnchain = false;
+                // Hide loading, show content
+                document.getElementById('lightningLoading').style.display = 'none';
+                document.getElementById('lightningContent').style.display = 'block';
 
-                if (lightningInvoice) {
-                    new QRious({ element: document.getElementById('lightning-qr'), value: lightningInvoice.toUpperCase(), size: 300 });
-                    hasLightning = true;
-                } else {
-                    lightningOption.style.display = 'none';
-                }
-                
-                if (onchainAddress) {
-                    new QRious({ element: document.getElementById('onchain-qr'), value: `bitcoin:${onchainAddress}`, size: 300 });
-                    document.getElementById('onchain-address').textContent = onchainAddress;
-                    hasOnchain = true;
-                } else {
-                    onchainOption.style.display = 'none';
-                }
+                // Display invoice
+                document.getElementById('lightningInvoice').textContent = data.lightningInvoice;
 
-                // --- ★★★ 3. Button Logic ★★★ ---
-                if (hasLightning && hasOnchain) {
-                    // Both exist, so the button should work
-                    switchBtnContainer.style.display = 'block';
-                    lightningOption.style.display = 'block'; // Show lightning by default
-                    onchainOption.style.display = 'none';
-                } else if (hasLightning) {
-                    // Only lightning
-                    switchBtnContainer.style.display = 'none';
-                    lightningOption.style.display = 'block';
-                } else if (hasOnchain) {
-                    // Only on-chain
-                    switchBtnContainer.style.display = 'none';
-                    onchainOption.style.display = 'block';
-                }
+                // Generate QR code
+                generateQRCode('lightningQR', data.lightningInvoice);
 
-                loadingMessage.style.display = 'none';
-                document.getElementById('custom-checkout').style.display = 'block';
-                startPolling(invoiceId); 
+                // Start checking payment status
+                checkPaymentStatus('lightning');
 
             } catch (error) {
-                loadingMessage.innerHTML = '<p style="color: red;">Could not load invoice. Please refresh the page to try again.</p>';
+                console.error('Error generating Lightning invoice:', error);
+                alert('Failed to generate Lightning invoice. Please try again.');
+                showPaymentSelection();
             }
-        });
+        }
 
-        // --- ★★★ 4. Click Handler for the Switch Button ★★★ ---
-        document.getElementById('switch-btn').addEventListener('click', () => {
-            const lightningOption = document.getElementById('lightning-option');
-            const onchainOption = document.getElementById('onchain-option');
-            const switchBtn = document.getElementById('switch-btn');
+        // Generate On-chain invoice
+        async function generateOnchainInvoice() {
+            try {
+                const response = await fetch(ELENPAY_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        amount: 10,
+                        currency: 'USD',
+                        description: 'Awesome Gadget',
+                        paymentMethod: 'onchain'
+                    })
+                });
 
-            // Check which one is currently visible
-            if (lightningOption.style.display === 'block') {
-                // Switch to on-chain
-                lightningOption.style.display = 'none';
-                onchainOption.style.display = 'block';
-                switchBtn.textContent = 'Pay with Lightning';
-            } else {
-                // Switch to lightning
-                lightningOption.style.display = 'block';
-                onchainOption.style.display = 'none';
-                switchBtn.textContent = 'Pay with Bitcoin (On-Chain)';
+                const data = await response.json();
+                currentInvoiceId = data.invoiceId;
+
+                // Hide loading, show content
+                document.getElementById('onchainLoading').style.display = 'none';
+                document.getElementById('onchainContent').style.display = 'block';
+
+                // Display address and amount
+                document.getElementById('onchainAddress').textContent = data.address;
+                document.getElementById('btcAmount').textContent = `${data.btcAmount} BTC`;
+
+                // Generate QR code with bitcoin URI
+                const bitcoinURI = `bitcoin:${data.address}?amount=${data.btcAmount}`;
+                generateQRCode('onchainQR', bitcoinURI);
+
+                // Start checking payment status
+                checkPaymentStatus('onchain');
+
+            } catch (error) {
+                console.error('Error generating on-chain invoice:', error);
+                alert('Failed to generate Bitcoin address. Please try again.');
+                showPaymentSelection();
             }
-        });
+        }
+
+        // Generate QR code
+        function generateQRCode(elementId, data) {
+            const canvas = document.getElementById(elementId);
+            const qr = new QRCode(canvas, {
+                text: data,
+                width: 250,
+                height: 250,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        }
+
+        // Copy to clipboard
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                // Show feedback
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        // Check payment status
+        function checkPaymentStatus(method) {
+            statusCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/check-status/${currentInvoiceId}`);
+                    const data = await response.json();
+
+                    if (data.status === 'paid' || data.status === 'completed') {
+                        // Payment received!
+                        clearInterval(statusCheckInterval);
+                        
+                        const statusElement = document.getElementById(
+                            method === 'lightning' ? 'lightningStatus' : 'onchainStatus'
+                        );
+                        
+                        statusElement.className = 'status-badge status-paid';
+                        statusElement.innerHTML = '✓ Payment Received!';
+
+                        // Redirect or show success message after a delay
+                        setTimeout(() => {
+                            window.location.href = '/success';
+                        }, 2000);
+                    }
+                } catch (error) {
+                    console.error('Error checking payment status:', error);
+                }
+            }, 5000); // Check every 5 seconds
+        }
     </script>
 </body>
 </html>

@@ -86,8 +86,12 @@ app.post('/api/create-invoice', async (req, res) => {
             amount: amount.toString(),
             currency: currency,
             checkout: {
-                // TESTING: Remove paymentMethods to see what Elenpay provides by default
-                // paymentMethods: paymentMethodsArray,
+                // Request BOTH payment methods explicitly
+                paymentMethods: paymentMethod === 'onchain' 
+                    ? ['BTC-Onchain', 'BTC-LightningNetwork']  // Request both for on-chain
+                    : paymentMethod === 'lightning'
+                    ? ['BTC-LightningNetwork']
+                    : ['BTC-LightningNetwork', 'BTC-Onchain'],
                 expirationMinutes: 15
             },
             metadata: {

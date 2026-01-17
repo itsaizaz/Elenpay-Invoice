@@ -840,9 +840,10 @@
                         statusElement.className = 'status-badge status-paid';
                         statusElement.innerHTML = '✓ Payment Received!';
 
-                        // Redirect or show success message after a delay
+                        // Redirect to success page with payment details
                         setTimeout(() => {
-                            window.location.href = '/success';
+                            const amount = document.getElementById('productPrice').textContent.replace('$', '');
+                            window.location.href = `/success.html?amount=${amount}&method=${method}&invoiceId=${currentInvoiceId}`;
                         }, 2000);
                     }
                 } catch (error) {

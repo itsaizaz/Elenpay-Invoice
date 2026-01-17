@@ -1,6 +1,7 @@
 {
   "name": "elenpay-payment-gateway-vercel",
   "version": "2.0.0",
+  "type": "module",
   "description": "Elenpay payment gateway with Lightning and On-chain Bitcoin support - Vercel optimized",
   "main": "api/create-invoice.js",
   "scripts": {

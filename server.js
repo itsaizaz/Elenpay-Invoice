@@ -450,17 +450,17 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📍 http://localhost:${PORT}`);
-    console.log(`⚡ Elenpay API: ${ELENPAY_API_URL}`);
+// app.listen(PORT, () => {
+//     console.log(`🚀 Server running on port ${PORT}`);
+//     console.log(`📍 http://localhost:${PORT}`);
+//     console.log(`⚡ Elenpay API: ${ELENPAY_API_URL}`);
     
-    if (!ELENPAY_API_TOKEN || !ELENPAY_STORE_ID) {
-        console.log(`\n⚠️  Warning: Elenpay credentials not configured!`);
-        console.log(`   Set ELENPAY_API_TOKEN and ELENPAY_STORE_ID in .env file\n`);
-    } else {
-        console.log(`✅ Elenpay configured for store: ${ELENPAY_STORE_ID}\n`);
-    }
-});
+//     if (!ELENPAY_API_TOKEN || !ELENPAY_STORE_ID) {
+//         console.log(`\n⚠️  Warning: Elenpay credentials not configured!`);
+//         console.log(`   Set ELENPAY_API_TOKEN and ELENPAY_STORE_ID in .env file\n`);
+//     } else {
+//         console.log(`✅ Elenpay configured for store: ${ELENPAY_STORE_ID}\n`);
+//     }
+// });
 
 module.exports = app;

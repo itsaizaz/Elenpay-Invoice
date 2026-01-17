@@ -86,7 +86,8 @@ app.post('/api/create-invoice', async (req, res) => {
             amount: amount.toString(),
             currency: currency,
             checkout: {
-                paymentMethods: paymentMethodsArray,
+                // TESTING: Remove paymentMethods to see what Elenpay provides by default
+                // paymentMethods: paymentMethodsArray,
                 expirationMinutes: 15
             },
             metadata: {
@@ -94,6 +95,8 @@ app.post('/api/create-invoice', async (req, res) => {
                 description: sanitizeMetadata(description || 'Payment')
             }
         };
+
+        console.log('Invoice data being sent:', JSON.stringify(invoiceData, null, 2));
 
         // Correct endpoint format: /api/v1/stores/{storeId}/invoices
         const invoice = await elenpayRequest(
